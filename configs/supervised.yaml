@@ -1,0 +1,17 @@
+seed: 42
+num_classes: 10
+num_labeled: 250
+
+batch_size: 64
+mu: 7
+
+epochs: 50
+
+lr: 0.03
+momentum: 0.9
+weight_decay: 0.0005
+
+ema_decay: 0.999
+
+num_workers: 2
+save_path: results/supervised_best.pt
