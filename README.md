@@ -168,3 +168,8 @@ ema_decay: 0.999
 
 num_workers: 2
 save_path: results/fixmatch_best.pt
+
+## Run in Colab
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]
+(https://colab.research.google.com/github/jchang431/CS7643_TeamProject/blob/main/notebooks/run_fixmatch_colab.ipynb)
