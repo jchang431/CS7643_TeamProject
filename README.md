@@ -169,6 +169,9 @@ ema_decay: 0.999
 num_workers: 2
 save_path: results/fixmatch_best.pt
 ```
+
+---
+
 ## Run in Colab
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]
