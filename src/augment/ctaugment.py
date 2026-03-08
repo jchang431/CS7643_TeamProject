@@ -232,14 +232,20 @@ def rescale(x, scale, method):
         s[0] * (1 - scale),
         s[1] * (1 - scale),
     )
+    try:
+      RESAMPLING = Image.Resampling
+    except AttributeError:
+      RESAMPLING = Image
+
     methods = (
-        Image.ANTIALIAS,
-        Image.BICUBIC,
-        Image.BILINEAR,
-        Image.BOX,
-        Image.HAMMING,
-        Image.NEAREST,
+        RESAMPLING.LANCZOS,
+        RESAMPLING.BICUBIC,
+        RESAMPLING.BILINEAR,
+        RESAMPLING.BOX,
+        RESAMPLING.HAMMING,
+        RESAMPLING.NEAREST,
     )
+
     method = methods[int(method * 5.99)]
     return x.crop(crop).resize(x.size, method)
 
