@@ -1,64 +1,128 @@
-# CS7643_TeamProject
-# SSL Project Progress Report: FixMatch Reproduction
+# CS7643_TeamProject  
+## SSL Project Progress Report: FixMatch Reproduction
+
+---
 
 ## Overview
 
-This project aims to reproduce and study **FixMatch** for semi-supervised learning on **CIFAR-10 with 250 labeled examples**.  
-Our current implementation is written in **PyTorch**, while the original Google Research implementation is written in **TensorFlow**.
+This project aims to reproduce and study **FixMatch** for semi-supervised learning on **CIFAR-10 with 250 labeled examples**.
+
+Our implementation is written in **PyTorch**, while the original Google Research implementation is written in **TensorFlow**.
+
+The goal of this project is to reproduce the FixMatch training pipeline and understand how implementation details influence semi-supervised learning performance.
 
 ---
 
-## Current Progress
+# Current Progress
 
-### 1. Dataset pipeline
-We have implemented the CIFAR-10 semi-supervised data pipeline, including:
+## 1. Dataset Pipeline
 
-- **Class-balanced labeled split**
-  - `num_labeled = 250`
-  - `25 labeled examples per class`
-- **Unlabeled set**
-  - currently uses the full CIFAR-10 training set as unlabeled data
-- Separate dataloaders for:
-  - labeled data
-  - unlabeled data
-  - test data
+We implemented the CIFAR-10 semi-supervised data pipeline, including:
 
-This follows the standard FixMatch setup.
+### Class-balanced labeled split
+
+- `num_labeled = 250`
+- `25 labeled examples per class`
+
+### Unlabeled dataset
+
+- The remaining CIFAR-10 training images are used as unlabeled data.
+
+### Separate dataloaders
+
+- labeled data
+- unlabeled data
+- test data
+
+For the unlabeled dataset, the dataloader returns:
+
+```
+(weak_image, strong_image, augmentation_policy)
+```
+
+The augmentation policy is used when **CTAugment** is enabled.
+
+This follows the standard **FixMatch semi-supervised learning setup**.
 
 ---
 
-### 2. Data augmentation
+## 2. Data Augmentation
+
 We implemented both **weak** and **strong** augmentations for FixMatch.
 
-#### Weak augmentation
+### Weak Augmentation
+
 Used for pseudo-label generation:
+
 - Random horizontal flip
 - Random crop with reflection padding
 
-#### Strong augmentation
-Used for consistency training:
+Weak augmentation generates a minimally perturbed version of the image for reliable pseudo-label prediction.
+
+---
+
+### Strong Augmentation
+
+Used for consistency training.
+
+We implemented two strong augmentation strategies.
+
+#### RandAugment
+
 - Random horizontal flip
 - Random crop with reflection padding
 - `RandAugment(num_ops=2, magnitude=10)`
 - Cutout-like corruption using `RandomErasing`
 
-### Comparison with the original FixMatch code
-Our augmentation design is conceptually aligned with FixMatch:
-- weak augmentation for pseudo-labeling
-- strong augmentation for unsupervised consistency loss
+#### CTAugment
 
-However, the original Google Research code uses a more complex augmentation framework:
-- CTAugment-based augmentation pool
-- Cutout added through the augmentation policy pipeline
+We also implemented **CTAugment**, which is used in the official FixMatch implementation.
 
-So, our augmentation is **functionally similar**, but not an exact line-by-line reproduction.
+CTAugment:
+
+- dynamically samples augmentation policies  
+- maintains probability distributions for augmentation strengths  
+- updates augmentation policies during training  
+
+Supported operations include:
+
+- rotate
+- translate
+- shear
+- brightness
+- contrast
+- color
+- posterize
+- solarize
+- blur
+- rescale
+- cutout
 
 ---
 
-### 3. Model
+### Comparison with the Original FixMatch Code
+
+Our augmentation design follows the same **weak vs strong augmentation principle** as FixMatch.
+
+However, the official Google Research implementation uses a more complex augmentation framework:
+
+- CTAugment-based augmentation pool
+- policy-based augmentation sampling
+- dynamic policy updates during training
+
+Our implementation supports both:
+
+- **RandAugment** (simpler baseline)
+- **CTAugment** (closer to the original implementation)
+
+---
+
+## 3. Model
+
 We implemented a **WideResNet-style classifier** in PyTorch.
 
-Current model:
+### Current Model Configuration
+
 - WRN-like architecture
 - depth = 28
 - widen factor = 2
@@ -66,86 +130,110 @@ Current model:
 - global average pooling
 - linear classifier
 
-### Comparison with the original FixMatch code
-The original FixMatch implementation uses a ResNet/WideResNet-style architecture in TensorFlow.
+---
 
-Our model is **structurally similar**, but not exactly identical in every low-level detail.  
+### Comparison with the Original FixMatch Code
+
+The original FixMatch implementation uses a WideResNet-like architecture implemented in TensorFlow.
+
+Our model is structurally similar, but not exactly identical in every low-level detail.
+
 Possible differences include:
-- shortcut handling
-- block implementation details
-- initialization details
+
+- shortcut implementation
+- block construction
+- parameter initialization
 - exact BatchNorm behavior
 
-So our model is a **reasonable PyTorch reimplementation**, but not an exact copy of the TensorFlow backbone.
+Therefore, our model can be considered a **reasonable PyTorch reimplementation** of the original architecture.
 
 ---
 
-### 4. FixMatch loss implementation
+## 4. FixMatch Loss Implementation
+
 We implemented the core FixMatch loss:
 
 - supervised cross-entropy on labeled data
 - pseudo-label generation from **weakly augmented unlabeled images**
 - confidence thresholding with `threshold = 0.95`
 - cross-entropy on **strongly augmented unlabeled images**
-- final loss:
-  
-  \[
-  L = L_s + \lambda_u L_u
-  \]
 
-with:
+### Final Loss
+
+```
+L = L_s + λ_u L_u
+```
+
+where:
+
+- `L_s` = supervised loss  
+- `L_u` = unsupervised consistency loss  
 - `lambda_u = 1.0`
-
-### Comparison with the original FixMatch code
-This part is very close to the original FixMatch algorithm.
-
-Implemented components match the paper and original code:
-- pseudo-label from weak augmentation
-- threshold-based masking
-- strong-augmentation consistency loss
-- labeled CE + unlabeled CE
-
-We also updated the implementation to include **interleave / de-interleave style batching** for better BatchNorm behavior, following the original code more closely.
 
 ---
 
-### 5. Training pipeline
-We implemented a PyTorch training loop with:
+### Comparison with the Original FixMatch Code
+
+This part closely follows the original FixMatch algorithm.
+
+Implemented components match both the **FixMatch paper** and the **official implementation**:
+
+- pseudo-label generation from weak augmentations
+- confidence-based masking
+- strong augmentation consistency training
+- supervised + unsupervised cross entropy
+
+We also updated the implementation to include:
+
+**interleave / de-interleave batching**
+
+This helps stabilize **BatchNorm statistics**, following the strategy used in the official implementation.
+
+---
+
+## 5. Training Pipeline
+
+We implemented a PyTorch training loop including:
 
 - SGD optimizer
 - momentum = 0.9
-- Nesterov = True
+- Nesterov momentum
 - weight decay = 0.0005
 - EMA model
 - cosine learning rate schedule
 - test accuracy evaluation using the EMA model
 - best model checkpoint saving
 
-### Comparison with the original `training.py`
-The original Google Research training code is much more abstract and framework-heavy.
+---
 
-Original TensorFlow training features:
+### Comparison with the Original `training.py`
+
+The original Google Research training code is significantly more complex and framework-heavy.
+
+Original TensorFlow training features include:
+
 - `Experiment` abstraction
-- distribution strategy (TPU / multi-GPU support)
+- distributed training (TPU / multi-GPU)
 - TensorFlow checkpoint manager
-- TensorBoard summary writing
+- TensorBoard logging
 - top-1 and top-5 metrics
 - EMA and raw model evaluation
-- highly modular training/evaluation loop
+- modular training / evaluation loops
 
-Our PyTorch training loop is much simpler:
-- single-GPU oriented
-- direct Python loop
-- manual optimizer step
-- manual EMA update
-- test accuracy only
+Our PyTorch implementation is intentionally simpler:
+
+- single-GPU training
+- direct Python training loop
+- manual optimizer updates
+- manual EMA updates
+- test accuracy evaluation only
 - manual checkpoint saving
 
-So the training logic is **algorithmically similar**, but the engineering structure is much simpler than the original TensorFlow framework.
+Thus, the training logic is **algorithmically similar**, but the engineering structure is simplified.
 
 ---
 
-## Hyperparameter Comparison
+# Hyperparameter Configuration
 
 Our current config:
 
@@ -165,6 +253,8 @@ weight_decay: 0.0005
 threshold: 0.95
 lambda_u: 1.0
 ema_decay: 0.999
+
+augment: randaugment   # or ctaugment
 
 num_workers: 2
 save_path: results/fixmatch_best.pt
