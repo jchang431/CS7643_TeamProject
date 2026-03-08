@@ -11,7 +11,6 @@ def set_seed(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-
 @torch.no_grad()
 def evaluate(model, loader, device):
     model.eval()

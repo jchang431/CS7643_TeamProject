@@ -29,6 +29,7 @@ def main():
         mu=cfg["mu"],
         num_workers=cfg["num_workers"],
         seed=cfg["seed"],
+        augment=cfg["augment"],
     )
 
     print(f"# labeled batches: {len(labeled_loader)}")
@@ -46,7 +47,6 @@ def main():
     )
 
     best_acc = 0.0
-
     num_steps_per_epoch = len(unlabeled_loader)
     total_steps = cfg["epochs"] * num_steps_per_epoch
     global_step = 0
@@ -62,7 +62,7 @@ def main():
         unsup_loss_meter = 0.0
         mask_meter = 0.0
 
-        for step_in_epoch in range(num_steps_per_epoch):
+        for _ in range(num_steps_per_epoch):
             try:
                 x_l, y_l = next(labeled_iter)
             except StopIteration:
@@ -70,25 +70,26 @@ def main():
                 x_l, y_l = next(labeled_iter)
 
             try:
-                x_uw, x_us = next(unlabeled_iter)
+                x_uw, x_us, policies = next(unlabeled_iter)
             except StopIteration:
                 unlabeled_iter = iter(unlabeled_loader)
-                x_uw, x_us = next(unlabeled_iter)
+                x_uw, x_us, policies = next(unlabeled_iter)
 
             x_l = x_l.to(device, non_blocking=True)
             y_l = y_l.to(device, non_blocking=True)
             x_uw = x_uw.to(device, non_blocking=True)
             x_us = x_us.to(device, non_blocking=True)
 
-            # Official-style per-step cosine LR update
             current_lr = get_cosine_lr(cfg["lr"], global_step, total_steps)
             for param_group in optimizer.param_groups:
                 param_group["lr"] = current_lr
 
             stats = fixmatch_loss(
                 model,
-                x_l, y_l,
-                x_uw, x_us,
+                x_l,
+                y_l,
+                x_uw,
+                x_us,
                 threshold=cfg["threshold"],
                 lambda_u=cfg["lambda_u"],
             )
@@ -99,6 +100,16 @@ def main():
             loss.backward()
             optimizer.step()
             ema_model.update(model)
+
+            if cfg["augment"] == "ctaugment":
+                pseudo_conf = stats["pseudo_max_probs"].detach().cpu().numpy()
+                pseudo_mask = stats["pseudo_mask_vec"].detach().cpu().numpy()
+
+                cta_obj = unlabeled_loader.dataset.transform.cta
+                for pol, conf, m in zip(policies, pseudo_conf, pseudo_mask):
+                    if pol is not None:
+                        proximity = float(conf) if m > 0 else float(conf * 0.5)
+                        cta_obj.update_rates(pol, proximity)
 
             total_loss_meter += stats["loss"].item()
             sup_loss_meter += stats["loss_x"].item()

@@ -1,10 +1,11 @@
-import random
 import numpy as np
 from PIL import Image
 
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+
+from src.augment.ctaugment import CTAugment, apply, pil_to_cta_array, cta_array_to_pil
 
 
 CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)
@@ -12,13 +13,15 @@ CIFAR10_STD = (0.2471, 0.2435, 0.2616)
 
 
 class TransformFixMatch:
-    def __init__(self, mean=CIFAR10_MEAN, std=CIFAR10_STD):
+    def __init__(self, augment="randaugment", mean=CIFAR10_MEAN, std=CIFAR10_STD):
+        self.augment = augment
+
         self.weak = transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.RandomCrop(32, padding=4, padding_mode="reflect"),
         ])
 
-        self.strong = transforms.Compose([
+        self.strong_rand = transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.RandomCrop(32, padding=4, padding_mode="reflect"),
             transforms.RandAugment(num_ops=2, magnitude=10),
@@ -30,18 +33,36 @@ class TransformFixMatch:
         ])
 
         self.cutout = transforms.RandomErasing(
-            p=1.0, scale=(0.02, 0.2), ratio=(0.3, 3.3), value="random"
+            p=1.0,
+            scale=(0.02, 0.2),
+            ratio=(0.3, 3.3),
+            value="random",
         )
+
+        self.cta = CTAugment() if augment == "ctaugment" else None
 
     def __call__(self, img):
         weak = self.weak(img)
-        strong = self.strong(img)
+
+        if self.augment == "randaugment":
+            strong = self.strong_rand(img)
+            policy = None
+
+        elif self.augment == "ctaugment":
+            strong_base = self.weak(img)
+            x = pil_to_cta_array(strong_base)
+            policy = self.cta.policy(probe=False)
+            x = apply(x, policy)
+            strong = cta_array_to_pil(x)
+
+        else:
+            raise ValueError(f"Unknown augment: {self.augment}")
 
         weak = self.normalize(weak)
         strong = self.normalize(strong)
         strong = self.cutout(strong)
 
-        return weak, strong
+        return weak, strong, policy
 
 
 def get_labeled_transform():
@@ -86,7 +107,15 @@ def x_u_split(labels, num_labeled, num_classes=10, seed=42):
 
 
 class CIFAR10SSL(datasets.CIFAR10):
-    def __init__(self, root, indexs=None, train=True, transform=None, target_transform=None, download=False):
+    def __init__(
+        self,
+        root,
+        indexs=None,
+        train=True,
+        transform=None,
+        target_transform=None,
+        download=False,
+    ):
         super().__init__(
             root=root,
             train=train,
@@ -118,14 +147,28 @@ class CIFAR10Unlabeled(CIFAR10SSL):
         img = Image.fromarray(img)
 
         if self.transform is not None:
-            weak, strong = self.transform(img)
+            weak, strong, policy = self.transform(img)
         else:
-            weak, strong = img, img
+            weak, strong, policy = img, img, None
 
-        return weak, strong
+        return weak, strong, policy
 
 
-def get_fixmatch_dataloaders(num_labeled=250, batch_size=64, mu=7, num_workers=2, seed=42):
+def unlabeled_collate_fn(batch):
+    weaks, strongs, policies = zip(*batch)
+    weaks = torch.stack(weaks, dim=0)
+    strongs = torch.stack(strongs, dim=0)
+    return weaks, strongs, list(policies)
+
+
+def get_fixmatch_dataloaders(
+    num_labeled=250,
+    batch_size=64,
+    mu=7,
+    num_workers=2,
+    seed=42,
+    augment="randaugment",
+):
     base_dataset = datasets.CIFAR10(root="./data", train=True, download=True)
     labels = base_dataset.targets
 
@@ -133,7 +176,7 @@ def get_fixmatch_dataloaders(num_labeled=250, batch_size=64, mu=7, num_workers=2
         labels=labels,
         num_labeled=num_labeled,
         num_classes=10,
-        seed=seed
+        seed=seed,
     )
 
     train_labeled_dataset = CIFAR10SSL(
@@ -148,7 +191,7 @@ def get_fixmatch_dataloaders(num_labeled=250, batch_size=64, mu=7, num_workers=2
         root="./data",
         indexs=unlabeled_idx,
         train=True,
-        transform=TransformFixMatch(),
+        transform=TransformFixMatch(augment=augment),
         download=False,
     )
 
@@ -175,6 +218,7 @@ def get_fixmatch_dataloaders(num_labeled=250, batch_size=64, mu=7, num_workers=2
         num_workers=num_workers,
         pin_memory=True,
         drop_last=True,
+        collate_fn=unlabeled_collate_fn,
     )
 
     test_loader = DataLoader(

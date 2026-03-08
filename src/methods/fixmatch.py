@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 
 
+# interleave/de_interleave: BatchNorm stabilization
+
 def interleave(x, size):
     s = list(x.shape)
     return x.reshape([-1, size] + s[1:]).transpose(0, 1).reshape([-1] + s[1:])
@@ -56,20 +58,24 @@ def fixmatch_loss(model, x_l, y_l, x_uw, x_us, threshold=0.95, lambda_u=1.0):
     # Official TF:
     # pseudo_labels = stop_gradient(softmax(logits_weak))
     with torch.no_grad():
+        #weak branch -> threshold -> fixmatch
         pseudo_probs = torch.softmax(logits_weak, dim=1)
         max_probs, pseudo_labels = torch.max(pseudo_probs, dim=1)
         mask = (max_probs >= threshold).float()
 
     # Official TF:
     # loss_xeu = mean(CE(logits_strong, argmax(pseudo_labels)) * pseudo_mask)
+    # strong branch CE -> mask
     loss_u_all = F.cross_entropy(logits_strong, pseudo_labels, reduction="none")
     loss_u = torch.mean(loss_u_all * mask)
 
     loss = loss_x + lambda_u * loss_u
 
     return {
-        "loss": loss,
-        "loss_x": loss_x,
-        "loss_u": loss_u,
-        "mask": mask.mean(),
+    "loss": loss,
+    "loss_x": loss_x,
+    "loss_u": loss_u,
+    "mask": mask.mean(),
+    "pseudo_max_probs": max_probs.detach(),
+    "pseudo_mask_vec": mask.detach(),
     }
